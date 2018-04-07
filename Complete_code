@@ -1,0 +1,249 @@
+```{r}
+library(xlsx) #for reading data
+library(plyr) #for data transformation and manipulation
+library(dplyr) #for data transformation and manipulation
+library(reshape2) #for data transformation and manipulation
+library(psych) #for bivariate analysis
+library(corrplot) #for plotting correlation
+library(gplots) # for mean plots
+library(dummies) #for dummy coding
+library(caret) #for creating predictive models
+library(mboost) #model based boosting package
+
+#read train and test data
+train <- read.xlsx("C:/Users/CG-DTE/Downloads/TechKriti'18/ProductX_Adoption_Survey_Data.xlsx", 1)
+test <- read.xlsx("C:/Users/CG-DTE/Downloads/TechKriti'18/New_Doc_Dataset.xlsx", 1)
+
+#structure of train data
+str(train)
+```
+There are 2000 observations in the train set and 1000 observations in test data.
+There are a total of 45 variables in the train data. The variable Adoption_Rate_Product_X is our target variable. All the variables are of numeric type.
+Based on the understanding of our data, the following variables are converted to factor variables.
+```{r}
+train$country <- as.factor(train$country)
+train$job_desc <- as.factor(train$job_desc)
+train$specialty <- as.factor(train$specialty)
+train$clinical_trial <- as.factor(train$clinical_trial)
+train$locality <- as.factor(train$locality)
+train$region <- as.factor(train$region)
+```
+
+Univariate Analysis -At this stage, we explore variables one by one. Univariate analysis is used to understand our data, highlight missing and outlier values. 
+
+```{r}
+summary(train$clinic_time)
+summary(train$patient_time)
+hist(train$clinic_time)
+hist(train$patient_time)
+```
+The 5 number summary along with the histogram shows that clinic_time and patient_time are uniformly distributed variables. Similar number of data points lie in each quartile.
+
+```{r}
+summary(train[,6:20])
+```
+Attributes a,b,o,d,i,f and l can be considered to be the key attributes the new drug must possess depending upon the mean and median of responses.
+
+```{r}
+summary(train[,21:31])
+boxplot(train[,21:31])
+```
+The boxplots show that Products b,c,e,g have outliers. They need to suitably treated otherwise they may lead to misleading results.
+All products seem to be used equally(as almost equal values of central tendency).
+
+```{r}
+hist(train$patient_age_avg)
+```
+This variable also has uniform distribution of data points.
+
+```{r}
+hist(train$perc_pediatric)
+```
+This variable also has uniform distribution of data points
+```{r}
+boxplot(train[,34:38])
+```
+
+Patients for whom drug was selected on the basis of A1c and Renal status have outliers.
+Current Treatment is the most sought factor for selection of the drug.
+```{r}
+summary(train$years_in_practice)
+boxplot(train$years_in_practice)
+plot(train$years_in_practice)
+```
+The respondents are experienced.75% of them have more than 18 years of experience. 
+Outliers are present for this variable.
+
+```{r}
+summary(train$Adoption_Rate_Product_X)
+hist(train$Adoption_Rate_Product_X)
+boxplot(train$Adoption_Rate_Product_X)
+```
+The target variable has a uniform distribution of data with a mean of 0.4486.
+
+```{r}
+prop.table(table(train$country))*100
+```
+46% of respondents are from country 5. 
+
+```{r}
+prop.table(table(train$job_desc))
+```
+The respondents are mainly Physician Assistants.
+```{r}
+prop.table(table(train$specialty))*100
+prop.table(table(train$clinical_trial))*100
+prop.table(table(train$personalized_treatment))*100
+prop.table(table(train$locality))*100
+prop.table(table(train$region))*100
+```
+Mostly the respondents reside in semi rural or semi urban localities.
+Most of the respondents participate in clinical trials.
+
+Bi-variate analysis - Bi-variate Analysis finds out the relationship between two variables. Here, we look for association and disassociation between variables at a pre-defined significance level.
+```{r}
+corrplot(round(cor(train[,-c(1,4,5,40,41,43,44)]),2), method = "circle")
+```
+
+```{r}
+pairs.panels(train[,c(32:39,45)])
+```
+No clear correlation among continuous variables. However outlier treatment  is required.  
+```{r}
+combos <- combn(c(4,5,40,42,43,44),2)
+
+chi_sq <- adply(combos, 2, function(x) {
+  test_ch <- chisq.test(train[, x[1]], train[, x[2]],simulate.p.value = TRUE)
+  
+  out <- data.frame("Row" = colnames(train)[x[1]]
+                    , "Column" = colnames(train[x[2]])
+                    , "Chi.Square" = round(test_ch$statistic,3)
+                    ,  "p.value" = round(test_ch$p.value, 3)
+  )
+  return(out)
+  
+})
+
+significant <- subset(chi_sq, p.value <= 0.05)
+
+```
+Correlation among categorical variables is calculated via chi square test and stored in "significant" dataframe. No factor variables seem to be related.
+
+```{r}
+plotmeans( Adoption_Rate_Product_X ~ country, data = train)
+plotmeans( Adoption_Rate_Product_X ~ job_desc, data = train)
+plotmeans( Adoption_Rate_Product_X ~ specialty, data = train)
+plotmeans( Adoption_Rate_Product_X ~ clinical_trial, data = train) 
+plotmeans( Adoption_Rate_Product_X ~ locality, data = train)
+plotmeans( Adoption_Rate_Product_X ~ region, data = train)
+```
+Only the variables country and job_desc have signficant differences in mean value of Adoption_Rate_Product_X for different levels. Rest of the variables have nearly same mean value for all levels. 
+
+Outlier treatment- 
+The numeric variables which are suspected to have outliers are treated by capping the values greater than 99 percentile to be equal to 99 percentile value.
+
+```{r}
+Target_variable <- train$Adoption_Rate_Product_x
+train$Adoption_Rate_Product_x <- NULL
+train$Adoption_Rate_Product_X <- Target_variable
+combine <- rbind(train, test)
+
+
+combine$years_in_practice[combine$years_in_practice > quantile(train$years_in_practice, probs = 0.99)] <-
+  quantile(train$years_in_practice, probs = 0.99)
+
+combine$driver_RenalStat[combine$driver_RenalStat > quantile(train$driver_RenalStat, probs = 0.99)] <-
+  quantile(train$driver_RenalStat, probs = 0.99)
+
+combine$driver_a1c[combine$driver_a1c > quantile(train$driver_a1c, probs = 0.99)] <-
+  quantile(train$driver_a1c, probs = 0.99)
+
+combine$driver_bmi[combine$driver_bmi > quantile(train$driver_bmi, probs = 0.99)] <-
+  quantile(train$driver_bmi, probs = 0.99)
+
+combine$product_g[combine$product_g > quantile(train$product_g, probs = 0.99)] <-
+  quantile(train$product_g, probs = 0.99)
+
+combine$product_e[combine$product_e > quantile(train$product_e, probs = 0.99)] <-
+  quantile(train$product_e, probs = 0.99)
+
+combine$product_c[combine$product_c > quantile(train$product_c, probs = 0.99)] <-
+  quantile(train$product_c, probs = 0.99)
+
+combine$product_b[combine$product_b > quantile(train$product_b, probs = 0.99)] <-
+  quantile(train$product_b, probs = 0.99)
+
+
+```
+
+Adding new varibles to our data :
+```{r}
+combine$country_region <- as.factor(paste(combine$country, combine$region, sep = "_", collapse = NULL))
+
+combine$rank <- ifelse(combine$years_in_practice<=15, 1, 0)
+combine$rank <- ifelse(combine$years_in_practice>15 & combine$years_in_practice<=25, 2, combine$rank)
+combine$rank <- ifelse(combine$years_in_practice>25 & combine$years_in_practice<=35, 3, combine$rank)
+combine$rank <- ifelse(combine$years_in_practice>35, 4, combine$rank)
+combine$rank <- as.factor(combine$rank)
+
+combine$work_time <- combine$clinic_time*combine$patient_time/100 
+
+combine$locality_semi <- as.factor(ifelse(combine$locality==2 | combine$locality==3, 1,0))
+
+train <- combine[combine$ID %in% train$ID, ]
+train$Adoption_Rate_Product_X <- Target_variable
+
+test1 <- combine[combine$ID %in% test$ID, ]
+```
+
+
+Model Training:
+Initially taking all the independent variables in model building.
+```{r}
+set.seed(2)
+train_sample <- sample(2000, 1600)
+
+train_model <- train[train_sample, ]
+test_model <- train[-train_sample, ]
+
+set.seed(92)
+fitControl = trainControl(method = "repeatedcv",
+                              number = 10,
+                              repeats = 10)
+glmBoostGrid = expand.grid(mstop = c(50, 100, 150, 200, 250, 300),
+                               prune = c('yes', 'no'))
+
+model1 <- train(Adoption_Rate_Product_X ~ ., data = train_model, method = "glmboost", trControl = fitControl,tuneGrid = glmBoostGrid, metric = "RMSE")
+summary(model1)
+pred<- predict(model1, test_model)
+
+SSE_T<- sum((test_model$Adoption_Rate_Product_X - pred)^2)
+SST <- sum((test_model$Adoption_Rate_Product_X - mean(test_model$Adoption_Rate_Product_X))^2)
+R_sq_value <- 1- SSE_T/SST
+RMSE_value <- RMSE(pred, test_model$Adoption_Rate_Product_X)
+
+plot(varImp(model1))
+```
+varImp() function gives the contribution or importance of each independent variable in model building process.
+Now taking only those variables which have non-zero contribution:
+
+```{r}
+model2 <- train(Adoption_Rate_Product_X ~ country+ job_desc+ att_a+product_a+ product_e+ 
+             product_g+ product_i+ att_o+ att_c+ att_g+ att_l+ work_time, data = train_model,      method = "glmboost", trControl = fitControl,tuneGrid = glmBoostGrid, metric = "RMSE")
+
+pred<- predict(model2, test_model)
+
+SSE_T<- sum((test_model$Adoption_Rate_Product_X - pred)^2)
+SST <- sum((test_model$Adoption_Rate_Product_X - mean(test_model$Adoption_Rate_Product_X))^2)
+R_sq_value <- 1- SSE_T/SST
+RMSE_value <- RMSE(pred, test_model$Adoption_Rate_Product_X)
+
+varImp(model2)
+```
+This model gives 85% accuracy on validation dataset and will be used for final prediction.
+```{r}
+final_prediction <- predict(model2, test1)
+test$Adoption_Rate_Product_X <- final_prediction
+write.csv(test, "New_Doc_Dataset.csv")
+```
+
